@@ -1,0 +1,72 @@
+# Core Django Stack
+Django==5.2.4
+djangorestframework==3.16.0
+django-cors-headers==4.7.0
+django-redis==6.0.0
+django-allauth==65.9.0
+dj-rest-auth==7.0.1
+djangorestframework-simplejwt==5.5.0
+
+# Celery Async/Background
+celery==5.5.3
+django_celery_results==2.6.0
+redis==6.2.0       # Always pin redis-py for Celery/Channels/Cache
+
+# Messaging for Celery/Channels
+amqp==5.3.1
+kombu==5.5.4
+billiard==4.2.1
+vine==5.1.0  # Required by kombu/celery
+
+# Channels / Async
+asgiref==3.9.0
+async-timeout==5.0.1
+
+# Social Auth (allauth covers most, consider carefully if using both social-auth-app-django and allauth!)
+# [Usually, pick just one ecosystem – here, assuming allauth only:]
+# If you don't use djoser or social-auth-app-django, you can remove them!
+# social-auth-app-django==5.5.1
+# social-auth-core==4.7.0
+# djoser==2.3.1      # Only if you want alternative JWT auth endpoints
+
+# JWT, OAuth, Security
+PyJWT==2.9.0
+oauthlib==3.3.1
+requests-oauthlib==2.0.0
+python3-openid==3.2.0
+
+# DB and Essential Utilities
+psycopg2-binary==2.9.10
+sqlparse==0.5.3
+python-decouple==3.8   # For .env configs and settings
+python-dateutil==2.9.0.post0
+pillow==11.3.0         # Images (user avatars, etc.)
+
+# HTTP and Requests
+requests==2.32.4
+certifi==2025.6.15
+idna==3.10
+charset-normalizer==3.4.2
+urllib3==2.5.0
+
+# Security/crypto
+cryptography==45.0.5
+cffi==1.17.1
+pycparser==2.22
+defusedxml==0.7.1      # Security for XML parsing
+
+# WSGI/ASGI
+gunicorn==23.0.0
+
+# General utilities
+six==1.17.0
+packaging==25.0
+tzdata==2025.2
+
+# Management/test/dev tools (keep out of prod dependencies if possible)
+click==8.2.1
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
+prompt_toolkit==3.0.51
+wcwidth==0.2.13
