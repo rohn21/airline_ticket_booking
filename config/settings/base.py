@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'django_redis',
     'corsheaders',
     'django_celery_results',
+    'django_filters',
 
     'accounts',
     'flights',
