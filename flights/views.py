@@ -1,4 +1,5 @@
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, status
+from rest_framework.response import Response
 from django_filters import rest_framework as dj_filters
 from .models import Airport, Airline, Aircraft, Route, Flight
 from .serializers import (
@@ -10,27 +11,40 @@ from .serializers import (
 )
 
 
-class AirportViewSet(viewsets.ReadOnlyModelViewSet):
+class AirportViewSet(viewsets.ModelViewSet):
     queryset = Airport.objects.filter(is_deleted=False)
     serializer_class = AirportSerializer
     permission_classes = [permissions.AllowAny]
     filter_backends = [filters.SearchFilter]
     search_fields = ["name", "code", "city", "country"]
 
+    def create(self, request, *args, **kwargs):
+        # Check if data is a list (bulk create)
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_bulk_create(serializer)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        else:
+            return super().create(request, *args, **kwargs)
 
-class AirlineViewSet(viewsets.ReadOnlyModelViewSet):
+    def perform_bulk_create(self, serializer):
+        serializer.save()
+
+
+class AirlineViewSet(viewsets.ModelViewSet):
     queryset = Airline.objects.filter(is_deleted=False)
     serializer_class = AirlineSerializer
     permission_classes = [permissions.AllowAny]
 
 
-class AircraftViewSet(viewsets.ReadOnlyModelViewSet):
+class AircraftViewSet(viewsets.ModelViewSet):
     queryset = Aircraft.objects.filter(is_deleted=False)
     serializer_class = AircraftSerializer
     permission_classes = [permissions.AllowAny]
 
 
-class RouteViewSet(viewsets.ReadOnlyModelViewSet):
+class RouteViewSet(viewsets.ModelViewSet):
     queryset = Route.objects.filter(is_deleted=False)
     serializer_class = RouteSerializer
     permission_classes = [permissions.AllowAny]
@@ -51,7 +65,7 @@ class FlightFilter(dj_filters.FilterSet):
         fields = ["origin", "destination", "airline", "flight_type", "departure_date", "status"]
 
 
-class FlightViewSet(viewsets.ReadOnlyModelViewSet):
+class FlightViewSet(viewsets.ModelViewSet):
     queryset = Flight.objects.filter(is_deleted=False).select_related("airline", "route", "aircraft").prefetch_related(
         "fare_rules__fare_class"
     )

@@ -1,1 +1,5 @@
-path("api/v1/flights/", include("flights.urls")),
+from django.urls import path, include
+
+urlpatterns = [
+    path("", include("flights.urls")),
+]
