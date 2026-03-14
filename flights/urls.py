@@ -14,7 +14,7 @@ router.register(r"airlines/bulk-update/", AirlineViewSet, basename="airline-upda
 router.register(r"aircrafts", AircraftViewSet, basename="aircraft")
 
 # route
-    router.register(r"routes", RouteViewSet, basename="route")
+router.register(r"routes", RouteViewSet, basename="route")
 
 # flights
 router.register(r"flights", FlightViewSet, basename="flight")
