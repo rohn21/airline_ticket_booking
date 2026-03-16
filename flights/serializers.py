@@ -90,19 +90,148 @@ class AirlineSerializer(serializers.ModelSerializer):
         return value
 
 
+class AircraftBulkListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        objs = [Aircraft(**item) for item in validated_data]
+        return Aircraft.objects.bulk_create(objs)
+
+    def update(self, instances, validated_data):
+        instance_map = {str(instance.id): instance for instance in instances}
+        updated_instances = []
+
+        for item in validated_data:
+            aircraft = instance_map.get(str(item.get("id")))
+            if not aircraft:
+                continue
+
+            for attr, value in item.items():
+                setattr(aircraft, attr, value)
+            updated_instances.append(aircraft)
+
+        if updated_instances:
+            Aircraft.objects.bulk_update(
+                updated_instances,
+                ["model", "registration", "seat_capacity"]
+            )
+        return updated_instances
+
+
 class AircraftSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+
     class Meta:
         model = Aircraft
         fields = ("id", "model", "registration", "seat_capacity")
+        list_serializer_class = AircraftBulkListSerializer
+        extra_kwargs = {
+            "registration": {"validators": []}
+        }
+
+    def validate_seat_capacity(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Seat capacity must be greater than 0.")
+        return value
+
+    def validate_registration(self, value):
+        qs = Aircraft.objects.filter(registration=value, is_deleted=False)
+        if self.instance is not None and not isinstance(self.instance, list):
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Aircraft registration already exists.")
+        return value
+
+
+class RouteBulkListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        objs = [Route(**item) for item in validated_data]
+        return Route.objects.bulk_create(objs)
+
+    def update(self, instances, validated_data):
+        instance_map = {str(instance.id): instance for instance in instances}
+        updated_instances = []
+
+        for item in validated_data:
+            route = instance_map.get(str(item.get("id")))
+            if not route:
+                continue
+
+            for attr, value in item.items():
+                setattr(route, attr, value)
+            updated_instances.append(route)
+
+        if updated_instances:
+            Route.objects.bulk_update(
+                updated_instances,
+                [
+                    "code",
+                    "origin",
+                    "destination",
+                    "flight_type",
+                    "distance_km",
+                    "estimated_duration",
+                ]
+            )
+        return updated_instances
 
 
 class RouteSerializer(serializers.ModelSerializer):
-    origin = AirportSerializer()
-    destination = AirportSerializer()
+    origin = AirportSerializer(read_only=True)
+    destination = AirportSerializer(read_only=True)
+
+    origin_id = serializers.PrimaryKeyRelatedField(
+        queryset=Airport.objects.filter(is_deleted=False),
+        source="origin",
+        write_only=True
+    )
+    destination_id = serializers.PrimaryKeyRelatedField(
+        queryset=Airport.objects.filter(is_deleted=False),
+        source="destination",
+        write_only=True
+    )
+
+    id = serializers.UUIDField(required=False)
 
     class Meta:
         model = Route
-        fields = ("id", "code", "origin", "destination", "flight_type", "distance_km", "estimated_duration")
+        fields = (
+            "id",
+            "code",
+            "origin",
+            "destination",
+            "origin_id",
+            "destination_id",
+            "flight_type",
+            "distance_km",
+            "estimated_duration",
+        )
+        list_serializer_class = RouteBulkListSerializer
+        extra_kwargs = {
+            "code": {"validators": []}
+        }
+
+    def validate_code(self, value):
+        qs = Route.objects.filter(code=value, is_deleted=False)
+        if self.instance is not None and not isinstance(self.instance, list):
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Route code already exists.")
+        return value
+
+    def validate(self, attrs):
+        origin = attrs.get("origin")
+        destination = attrs.get("destination")
+
+        if not origin and self.instance:
+            origin = self.instance.origin
+        if not destination and self.instance:
+            destination = self.instance.destination
+
+        if origin and destination and origin == destination:
+            raise serializers.ValidationError(
+                {"destination_id": "Origin and destination cannot be the same."}
+            )
+        return attrs
+
 
 
 class FareRuleSerializer(serializers.ModelSerializer):
@@ -113,10 +242,10 @@ class FareRuleSerializer(serializers.ModelSerializer):
         fields = ("id", "fare_class", "price", "currency", "refundable", "baggage_allowance_kg", "seat_count")
 
 
-class FlightSerializer(serializers.ModelSerializer):
-    airline = AirlineSerializer()
-    route = RouteSerializer()
-    aircraft = AircraftSerializer()
+class FlightReadSerializer(serializers.ModelSerializer):
+    airline = AirlineSerializer(read_only=True)
+    route = RouteSerializer(read_only=True)
+    aircraft = AircraftSerializer(read_only=True)
     fare_rules = FareRuleSerializer(many=True, read_only=True)
 
     class Meta:
@@ -136,3 +265,131 @@ class FlightSerializer(serializers.ModelSerializer):
             "terminal",
             "fare_rules",
         )
+
+class FareRuleWriteSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+    flight = serializers.PrimaryKeyRelatedField(
+        queryset=Flight.objects.filter(is_deleted=False)
+    )
+
+    class Meta:
+        model = FareRule
+        fields = (
+            "id",
+            "flight",
+            "fare_class",
+            "price",
+            "currency",
+            "refundable",
+            "baggage_allowance_kg",
+            "seat_count",
+        )
+
+
+class FlightBulkListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        objs = [Flight(**item) for item in validated_data]
+        return Flight.objects.bulk_create(objs)
+
+    def update(self, instances, validated_data):
+        instance_map = {str(instance.id): instance for instance in instances}
+        updated_instances = []
+
+        for item in validated_data:
+            flight = instance_map.get(str(item.get("id")))
+            if not flight:
+                continue
+
+            for attr, value in item.items():
+                setattr(flight, attr, value)
+            updated_instances.append(flight)
+
+        if updated_instances:
+            Flight.objects.bulk_update(
+                updated_instances,
+                [
+                    "flight_number",
+                    "airline",
+                    "route",
+                    "aircraft",
+                    "departure_time",
+                    "arrival_time",
+                    "status",
+                    "total_seats",
+                    "seats_available",
+                    "gate",
+                    "terminal",
+                ]
+            )
+        return updated_instances
+
+
+class FlightWriteSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+
+    airline_id = serializers.PrimaryKeyRelatedField(
+        queryset=Airline.objects.filter(is_deleted=False),
+        source="airline"
+    )
+    route_id = serializers.PrimaryKeyRelatedField(
+        queryset=Route.objects.filter(is_deleted=False),
+        source="route"
+    )
+    aircraft_id = serializers.PrimaryKeyRelatedField(
+        queryset=Aircraft.objects.filter(is_deleted=False),
+        source="aircraft"
+    )
+
+    class Meta:
+        model = Flight
+        fields = (
+            "id",
+            "flight_number",
+            "airline_id",
+            "route_id",
+            "aircraft_id",
+            "departure_time",
+            "arrival_time",
+            "status",
+            "total_seats",
+            "seats_available",
+            "gate",
+            "terminal",
+        )
+        list_serializer_class = FlightBulkListSerializer
+        extra_kwargs = {
+            "flight_number": {"validators": []}
+        }
+
+    def validate_flight_number(self, value):
+        qs = Flight.objects.filter(flight_number=value, is_deleted=False)
+        if self.instance is not None and not isinstance(self.instance, list):
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Flight number already exists.")
+        return value
+
+    def validate(self, attrs):
+        departure_time = attrs.get("departure_time")
+        arrival_time = attrs.get("arrival_time")
+        total_seats = attrs.get("total_seats")
+        seats_available = attrs.get("seats_available")
+
+        if self.instance:
+            departure_time = departure_time or self.instance.departure_time
+            arrival_time = arrival_time or self.instance.arrival_time
+            total_seats = total_seats if total_seats is not None else self.instance.total_seats
+            seats_available = seats_available if seats_available is not None else self.instance.seats_available
+
+        if departure_time and arrival_time and arrival_time <= departure_time:
+            raise serializers.ValidationError(
+                {"arrival_time": "Arrival time must be after departure time."}
+            )
+
+        if total_seats is not None and seats_available is not None and seats_available > total_seats:
+            raise serializers.ValidationError(
+                {"seats_available": "Seats available cannot exceed total seats."}
+            )
+
+        return attrs
+

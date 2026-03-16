@@ -10,11 +10,13 @@ router.register(r"airports/bulk-update/", AirportViewSet, basename="airport-upda
 router.register(r"airlines", AirlineViewSet, basename="airline")
 router.register(r"airlines/bulk-update/", AirlineViewSet, basename="airline-update-bulk")
 
-# aircraft
+# aircrafts
 router.register(r"aircrafts", AircraftViewSet, basename="aircraft")
+router.register(r"aircrafts/bulk-update/", AircraftViewSet, basename="aircraft-update-bulk")
 
 # route
 router.register(r"routes", RouteViewSet, basename="route")
+router.register(r"routes/bulk-update/", RouteViewSet, basename="routes-update-bulk")
 
 # flights
 router.register(r"flights", FlightViewSet, basename="flight")

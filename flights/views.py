@@ -2,14 +2,18 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django_filters import rest_framework as dj_filters
-from flights.models import Airport, Airline, Aircraft, Route, Flight
+from flights.models import Airport, Airline, Aircraft, Route, Flight, FareRule
 from flights.serializers import (
     AirportSerializer,
     AirlineSerializer,
     AircraftSerializer,
     RouteSerializer,
-    FlightSerializer,
+    FlightReadSerializer,
+    FlightWriteSerializer,
+    FareRuleSerializer,
+    FareRuleWriteSerializer,
 )
+
 
 # AIRPORTS
 class AirportViewSet(viewsets.ModelViewSet):
@@ -58,6 +62,7 @@ class AirportViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 # AIRLINES
 class AirlineViewSet(viewsets.ModelViewSet):
@@ -108,20 +113,111 @@ class AirlineViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
-
 class AircraftViewSet(viewsets.ModelViewSet):
     queryset = Aircraft.objects.filter(is_deleted=False)
     serializer_class = AircraftSerializer
     permission_classes = [permissions.AllowAny]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["model", "registration"]
+
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            return Response(
+                {"detail": "Use /aircrafts/bulk-update/ for bulk update."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["put"], url_path="bulk-update")
+    def bulk_update(self, request):
+        if not isinstance(request.data, list):
+            return Response(
+                {"detail": "Expected a list of aircraft objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get("id") for item in request.data if item.get("id")]
+        instances = list(Aircraft.objects.filter(id__in=ids, is_deleted=False))
+
+        serializer = self.get_serializer(
+            instances,
+            data=request.data,
+            many=True,
+            partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RouteViewSet(viewsets.ModelViewSet):
-    queryset = Route.objects.filter(is_deleted=False)
+    queryset = Route.objects.filter(is_deleted=False).select_related("origin", "destination")
     serializer_class = RouteSerializer
     permission_classes = [permissions.AllowAny]
-    filter_backends = [dj_filters.DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ["origin__id", "destination__id", "flight_type"]
-    search_fields = ["origin__name", "destination__name", "code"]
+    filter_backends = [filters.SearchFilter]
+    search_fields = [
+        "code",
+        "flight_type",
+        "origin__name",
+        "origin__code",
+        "origin__city",
+        "destination__name",
+        "destination__code",
+        "destination__city",
+    ]
+
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            return Response(
+                {"detail": "Use /routes/bulk-update/ for bulk update."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["put"], url_path="bulk-update")
+    def bulk_update(self, request):
+        if not isinstance(request.data, list):
+            return Response(
+                {"detail": "Expected a list of route objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get("id") for item in request.data if item.get("id")]
+        instances = list(
+            Route.objects.filter(id__in=ids, is_deleted=False).select_related("origin", "destination")
+        )
+
+        serializer = self.get_serializer(
+            instances,
+            data=request.data,
+            many=True,
+            partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class FlightFilter(dj_filters.FilterSet):
@@ -136,14 +232,98 @@ class FlightFilter(dj_filters.FilterSet):
         fields = ["origin", "destination", "airline", "flight_type", "departure_date", "status"]
 
 
-class FlightViewSet(viewsets.ModelViewSet):
-    queryset = Flight.objects.filter(is_deleted=False).select_related("airline", "route", "aircraft").prefetch_related(
-        "fare_rules__fare_class"
-    )
-    serializer_class = FlightSerializer
+class FareRuleViewSet(viewsets.ModelViewSet):
+    queryset = FareRule.objects.filter(is_deleted=False).select_related("flight", "fare_class")
     permission_classes = [permissions.AllowAny]
-    filter_backends = [dj_filters.DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_class = FlightFilter
-    search_fields = ["flight_number", "airline__name", "route__origin__name", "route__destination__name"]
-    ordering_fields = ["departure_time", "seats_available"]
-    ordering = ["departure_time"]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["currency", "fare_class__name", "flight__flight_number"]
+
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve"]:
+            return FareRuleSerializer
+        return FareRuleWriteSerializer
+
+
+class FlightViewSet(viewsets.ModelViewSet):
+    queryset = Flight.objects.filter(is_deleted=False).select_related(
+        "airline", "route__origin", "route__destination", "aircraft"
+    ).prefetch_related("fare_rules")
+    permission_classes = [permissions.AllowAny]
+    filter_backends = [filters.SearchFilter]
+    search_fields = [
+        "flight_number",
+        "status",
+        "gate",
+        "terminal",
+        "airline__name",
+        "airline__code",
+        "route__code",
+        "route__origin__code",
+        "route__destination__code",
+        "aircraft__registration",
+    ]
+
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve"]:
+            return FlightReadSerializer
+        return FlightWriteSerializer
+
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            read_serializer = FlightReadSerializer(serializer.instance, many=True)
+            return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        read_serializer = FlightReadSerializer(instance)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            return Response(
+                {"detail": "Use /flights/bulk-update/ for bulk update."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        read_serializer = FlightReadSerializer(instance)
+        return Response(read_serializer.data, status=status.HTTP_200_OK)
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def finalize_response_data(self, instance):
+        return FlightReadSerializer(instance).data
+
+    @action(detail=False, methods=["put"], url_path="bulk-update")
+    def bulk_update(self, request):
+        if not isinstance(request.data, list):
+            return Response(
+                {"detail": "Expected a list of flight objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get("id") for item in request.data if item.get("id")]
+        instances = list(Flight.objects.filter(id__in=ids, is_deleted=False))
+
+        serializer = self.get_serializer(
+            instances,
+            data=request.data,
+            many=True,
+            partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        read_serializer = FlightReadSerializer(serializer.instance, many=True)
+        return Response(read_serializer.data, status=status.HTTP_200_OK)
+
