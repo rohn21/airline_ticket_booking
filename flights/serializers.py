@@ -70,6 +70,7 @@ class AirlineBulkListSerializer(serializers.ListSerializer):
             )
         return updated_instances
 
+
 class AirlineSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(required=False)
 
@@ -233,20 +234,146 @@ class RouteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class FareClassBulkListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        objs = [FareClass(**item) for item in validated_data]
+        return FareClass.objects.bulk_create(objs)
 
-class FareRuleSerializer(serializers.ModelSerializer):
+    def update(self, instances, validated_data):
+        instance_map = {str(instance.id): instance for instance in instances}
+        updated_instances = []
+
+        for item in validated_data:
+            fare_class = instance_map.get(str(item.get("id")))
+            if not fare_class:
+                continue
+
+            for attr, value in item.items():
+                setattr(fare_class, attr, value)
+            updated_instances.append(fare_class)
+
+        if updated_instances:
+            FareClass.objects.bulk_update(updated_instances, ["code", "name"])
+        return updated_instances
+
+
+class FareClassSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+
+    class Meta:
+        model = FareClass
+        fields = ("id", "code", "name")
+        list_serializer_class = FareClassBulkListSerializer
+        validators = []
+
+    def validate(self, attrs):
+        code = attrs.get("code")
+        name = attrs.get("name")
+
+        if self.instance:
+            code = code or self.instance.code
+            name = name or self.instance.name
+
+        qs = FareClass.objects.filter(code=code, name=name, is_deleted=False)
+        if self.instance is not None and not isinstance(self.instance, list):
+            qs = qs.exclude(pk=self.instance.pk)
+
+        if qs.exists():
+            raise serializers.ValidationError("Fare class with this code and name already exists.")
+        return attrs
+
+
+
+class FareRuleBulkListSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        objs = [FareRule(**item) for item in validated_data]
+        return FareRule.objects.bulk_create(objs)
+
+    def update(self, instances, validated_data):
+        instance_map = {str(instance.id): instance for instance in instances}
+        updated_instances = []
+
+        for item in validated_data:
+            fare_rule = instance_map.get(str(item.get("id")))
+            if not fare_rule:
+                continue
+
+            for attr, value in item.items():
+                setattr(fare_rule, attr, value)
+            updated_instances.append(fare_rule)
+
+        if updated_instances:
+            FareRule.objects.bulk_update(
+                updated_instances,
+                [
+                    "flight",
+                    "fare_class",
+                    "price",
+                    "currency",
+                    "refundable",
+                    "baggage_allowance_kg",
+                    "seat_count",
+                ]
+            )
+        return updated_instances
+
+
+class FareRuleReadSerializer(serializers.ModelSerializer):
     fare_class = serializers.StringRelatedField()
 
     class Meta:
         model = FareRule
-        fields = ("id", "fare_class", "price", "currency", "refundable", "baggage_allowance_kg", "seat_count")
+        fields = (
+            "id",
+            "fare_class",
+            "price",
+            "currency",
+            "refundable",
+            "baggage_allowance_kg",
+            "seat_count",
+        )
+
+
+class FareRuleWriteSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+    flight = serializers.PrimaryKeyRelatedField(
+        queryset=Flight.objects.filter(is_deleted=False)
+    )
+    fare_class = serializers.PrimaryKeyRelatedField(
+        queryset=FareClass.objects.filter(is_deleted=False)
+    )
+
+    class Meta:
+        model = FareRule
+        fields = (
+            "id",
+            "flight",
+            "fare_class",
+            "price",
+            "currency",
+            "refundable",
+            "baggage_allowance_kg",
+            "seat_count",
+        )
+        list_serializer_class = FareRuleBulkListSerializer
+
+    def validate_seat_count(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Seat count cannot be negative.")
+        return value
+
+    def validate_baggage_allowance_kg(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Baggage allowance cannot be negative.")
+        return value
+
 
 
 class FlightReadSerializer(serializers.ModelSerializer):
     airline = AirlineSerializer(read_only=True)
     route = RouteSerializer(read_only=True)
     aircraft = AircraftSerializer(read_only=True)
-    fare_rules = FareRuleSerializer(many=True, read_only=True)
+    fare_rules = FareRuleReadSerializer(many=True, read_only=True)
 
     class Meta:
         model = Flight
@@ -264,25 +391,6 @@ class FlightReadSerializer(serializers.ModelSerializer):
             "gate",
             "terminal",
             "fare_rules",
-        )
-
-class FareRuleWriteSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(required=False)
-    flight = serializers.PrimaryKeyRelatedField(
-        queryset=Flight.objects.filter(is_deleted=False)
-    )
-
-    class Meta:
-        model = FareRule
-        fields = (
-            "id",
-            "flight",
-            "fare_class",
-            "price",
-            "currency",
-            "refundable",
-            "baggage_allowance_kg",
-            "seat_count",
         )
 
 
@@ -392,4 +500,3 @@ class FlightWriteSerializer(serializers.ModelSerializer):
             )
 
         return attrs
-
