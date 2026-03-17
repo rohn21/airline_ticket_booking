@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, filters, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django_filters import rest_framework as dj_filters
-from flights.models import Airport, Airline, Aircraft, Route, Flight, FareRule
+from flights.models import Airport, Airline, Aircraft, Route, Flight, FareClass, FareRule
 from flights.serializers import (
     AirportSerializer,
     AirlineSerializer,
@@ -10,7 +10,8 @@ from flights.serializers import (
     RouteSerializer,
     FlightReadSerializer,
     FlightWriteSerializer,
-    FareRuleSerializer,
+    FareClassSerializer,
+    FareRuleReadSerializer,
     FareRuleWriteSerializer,
 )
 
@@ -232,16 +233,105 @@ class FlightFilter(dj_filters.FilterSet):
         fields = ["origin", "destination", "airline", "flight_type", "departure_date", "status"]
 
 
-class FareRuleViewSet(viewsets.ModelViewSet):
-    queryset = FareRule.objects.filter(is_deleted=False).select_related("flight", "fare_class")
+class FareClassViewSet(viewsets.ModelViewSet):
+    queryset = FareClass.objects.filter(is_deleted=False)
+    serializer_class = FareClassSerializer
     permission_classes = [permissions.AllowAny]
     filter_backends = [filters.SearchFilter]
-    search_fields = ["currency", "fare_class__name", "flight__flight_number"]
+    search_fields = ["code", "name"]
+
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            return Response(
+                {"detail": "Use /fare-classes/bulk-update/ for bulk update."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["put"], url_path="bulk-update")
+    def bulk_update(self, request):
+        if not isinstance(request.data, list):
+            return Response(
+                {"detail": "Expected a list of fare class objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get("id") for item in request.data if item.get("id")]
+        instances = list(FareClass.objects.filter(id__in=ids, is_deleted=False))
+
+        serializer = self.get_serializer(instances, data=request.data, many=True, partial=False)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class FareRuleViewSet(viewsets.ModelViewSet):
+    queryset = FareRule.objects.filter(is_deleted=False).select_related("fare_class", "flight")
+    permission_classes = [permissions.AllowAny]
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["currency", "fare_class__code", "fare_class__name", "flight__flight_number"]
 
     def get_serializer_class(self):
         if self.action in ["list", "retrieve"]:
-            return FareRuleSerializer
+            return FareRuleReadSerializer
         return FareRuleWriteSerializer
+
+    def create(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            serializer = self.get_serializer(data=request.data, many=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            read_serializer = FareRuleReadSerializer(serializer.instance, many=True)
+            return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        read_serializer = FareRuleReadSerializer(instance)
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        if isinstance(request.data, list):
+            return Response(
+                {"detail": "Use /fare-rules/bulk-update/ for bulk update."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.save()
+        read_serializer = FareRuleReadSerializer(instance)
+        return Response(read_serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["put"], url_path="bulk-update")
+    def bulk_update(self, request):
+        if not isinstance(request.data, list):
+            return Response(
+                {"detail": "Expected a list of fare rule objects."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ids = [item.get("id") for item in request.data if item.get("id")]
+        instances = list(FareRule.objects.filter(id__in=ids, is_deleted=False))
+
+        serializer = self.get_serializer(instances, data=request.data, many=True, partial=False)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        read_serializer = FareRuleReadSerializer(serializer.instance, many=True)
+        return Response(read_serializer.data, status=status.HTTP_200_OK)
+
 
 
 class FlightViewSet(viewsets.ModelViewSet):
