@@ -1,5 +1,5 @@
 from rest_framework.routers import DefaultRouter
-from .views import AirportViewSet, AirlineViewSet, AircraftViewSet, RouteViewSet, FlightViewSet
+from .views import AirportViewSet, AirlineViewSet, AircraftViewSet, RouteViewSet, FareRuleViewSet,  FareClassViewSet, FlightViewSet
 
 router = DefaultRouter()
 # airports
@@ -17,6 +17,14 @@ router.register(r"aircrafts/bulk-update/", AircraftViewSet, basename="aircraft-u
 # route
 router.register(r"routes", RouteViewSet, basename="route")
 router.register(r"routes/bulk-update/", RouteViewSet, basename="routes-update-bulk")
+
+#fare_class
+router.register(r"fare_classes", FareClassViewSet, basename="fare_class")
+router.register(r"fare_classes/bulk-update/", FareClassViewSet, basename="fare_class-update-bulk")
+
+#fare_rule
+router.register(r"fare_rules", FareRuleViewSet, basename="fare_rules")
+router.register(r"fare_rules/bulk-update/", FareRuleViewSet, basename="fare_rules-update-bulk")
 
 # flights
 router.register(r"flights", FlightViewSet, basename="flight")
