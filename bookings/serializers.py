@@ -330,8 +330,8 @@ class BookingCancelSerializer(serializers.Serializer):
 
         return booking
 
-    def to_representation(self, instance):
-        return BookingReadSerializer(instance, context=self.context).data
+    # def to_representation(self, instance):
+    #     return BookingReadSerializer(instance, context=self.context).data
 
 
 class BookingConfirmSerializer(serializers.Serializer):
@@ -370,5 +370,5 @@ class BookingConfirmSerializer(serializers.Serializer):
 
         return booking
 
-    def to_representation(self, instance):
-        return BookingReadSerializer(instance, context=self.context).data
+    # def to_representation(self, instance):
+    #     return BookingReadSerializer(instance, context=self.context).data
