@@ -1,10 +1,23 @@
-from rest_framework import viewsets, permissions, filters, status
-from rest_framework.response import Response
+from django.db import transaction
+from rest_framework import status, permissions, viewsets, filters
 from rest_framework.decorators import action
-from django_filters import rest_framework as dj_filters
-from bookings.models import Booking, Passenger, BookingAudit, SeatAssignment
-from bookings.serializers import BookingReadSerializer, BookingCreateSerializer, BookingCancelSerializer, \
-    BookingConfirmSerializer, BookingContactUpdateSerializer
+from rest_framework.response import Response
+
+from bookings.models import Booking
+from bookings.serializers import (
+    BookingCreateSerializer,
+    BookingReadSerializer,
+    BookingContactUpdateSerializer,
+    BookingCancelSerializer,
+    BookingConfirmSerializer,
+)
+from bookings.tasks import (
+    send_booking_created_email,
+    send_booking_confirmed_email,
+    create_booking_audit_log,
+    generate_ticket_artifact,
+)
+from flights.tasks import refresh_flight_cache
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -25,7 +38,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         "flight__route__destination__code",
     ]
 
-    # default, will be overridden by get_serializer_class
     serializer_class = BookingReadSerializer
 
     def get_serializer_class(self):
@@ -42,12 +54,28 @@ class BookingViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        booking = serializer.save()
+
+        with transaction.atomic():
+            booking = serializer.save()
+
+            transaction.on_commit(
+                lambda booking_id=booking.id: send_booking_created_email.delay(booking_id)
+            )
+            transaction.on_commit(
+                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
+                    booking_id,
+                    "BOOKING_CREATED",
+                    {"pnr": pnr}
+                )
+            )
+            transaction.on_commit(
+                lambda flight_id=booking.flight_id:     refresh_flight_cache.delay(flight_id)
+            )
+
         read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
         return Response(read_serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        # we only support partial updates for contact details; full PUT is discouraged
         kwargs["partial"] = True
         return self.partial_update(request, *args, **kwargs)
 
@@ -55,7 +83,21 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         serializer = self.get_serializer(booking, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        booking = serializer.save()
+
+        with transaction.atomic():
+            booking = serializer.save()
+
+            transaction.on_commit(
+                lambda booking_id=booking.id: create_booking_audit_log.delay(
+                    booking_id,
+                    "BOOKING_CONTACT_UPDATED",
+                    {
+                        "contact_email": booking.contact_email,
+                        "contact_phone": booking.contact_phone,
+                    }
+                )
+            )
+
         read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
         return Response(read_serializer.data, status=status.HTTP_200_OK)
 
@@ -64,7 +106,21 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         serializer = self.get_serializer(booking, data=request.data)
         serializer.is_valid(raise_exception=True)
-        booking = serializer.save()
+
+        with transaction.atomic():
+            booking = serializer.save()
+
+            transaction.on_commit(
+                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
+                    booking_id,
+                    "BOOKING_CANCELLED",
+                    {"pnr": pnr}
+                )
+            )
+            transaction.on_commit(
+                lambda flight_id=booking.flight_id: refresh_flight_cache.delay(flight_id)
+            )
+
         read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
         return Response(read_serializer.data, status=status.HTTP_200_OK)
 
@@ -73,7 +129,26 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         serializer = self.get_serializer(booking, data=request.data)
         serializer.is_valid(raise_exception=True)
-        booking = serializer.save()
+
+        with transaction.atomic():
+            booking = serializer.save()
+
+            transaction.on_commit(
+                lambda booking_id=booking.id: send_booking_confirmed_email.delay(booking_id)
+            )
+            transaction.on_commit(
+                lambda booking_id=booking.id: generate_ticket_artifact.delay(booking_id)
+            )
+            transaction.on_commit(
+                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
+                    booking_id,
+                    "BOOKING_CONFIRMED",
+                    {"pnr": pnr}
+                )
+            )
+            transaction.on_commit(
+                lambda flight_id=booking.flight_id: refresh_flight_cache.delay(flight_id)
+            )
+
         read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
         return Response(read_serializer.data, status=status.HTTP_200_OK)
-
