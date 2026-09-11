@@ -87,6 +87,8 @@ class Booking(BaseModel):
     cancelled_at = models.DateTimeField(null=True, blank=True)
 
     remarks = models.TextField(blank=True, null=True)
+    ticket_url = models.CharField(max_length=512, blank=True, null=True)
+
 
     class Meta:
         ordering = ["-created_at"]

@@ -5,5 +5,9 @@ urlpatterns = [
     path("", include("flights.urls")),
     path("", include("accounts.urls")),
     path("", include("bookings.urls")),
+    path("", include("notifications.urls")),
+    path("", include("tickets.urls")),
     # path("", include("payments.urls")),
 ]
+
+

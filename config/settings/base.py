@@ -60,7 +60,9 @@ INSTALLED_APPS = [
     'travel_core',
     'payments',
     'notifications',
+    'operations',
 ]
+
 
 
 
