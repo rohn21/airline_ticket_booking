@@ -117,7 +117,6 @@ class Booking(BaseModel):
                 if not Booking.objects.filter(pnr=pnr).exists():
                     self.pnr = pnr
                     break
-        self.full_clean()
         super().save(*args, **kwargs)
 
 
