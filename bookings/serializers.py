@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from bookings.tasks import create_booking_audit_log
 from flights.models import Flight, FareRule
 from flights.serializers import FlightReadSerializer, FareRuleReadSerializer
 from .models import (
@@ -235,9 +236,9 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         ]
         Passenger.objects.bulk_create(passenger_objs)
 
-        BookingAudit.objects.create(
-            booking=booking,
-            actor=request.user if request and request.user.is_authenticated else None,
+        actor_id = request.user.id if request and request.user.is_authenticated else None
+        transaction.on_commit(lambda: create_booking_audit_log.delay(
+            booking_id=booking.id,
             action="booking_created",
             note="Booking created successfully.",
             metadata={
@@ -245,7 +246,8 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 "fare_rule_id": str(fare_rule.id),
                 "passenger_count": passenger_count,
             },
-        )
+            actor_id=actor_id
+        ))
 
         return booking
 
@@ -283,13 +285,14 @@ class BookingContactUpdateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        BookingAudit.objects.create(
-            booking=instance,
-            actor=request.user if request and request.user.is_authenticated else None,
+        actor_id = request.user.id if request and request.user.is_authenticated else None
+        transaction.on_commit(lambda: create_booking_audit_log.delay(
+            booking_id=instance.id,
             action="booking_contact_updated",
             note="Booking contact details updated.",
             metadata=validated_data,
-        )
+            actor_id=actor_id
+        ))
 
         return instance
 
@@ -320,13 +323,14 @@ class BookingCancelSerializer(serializers.Serializer):
         booking.cancelled_at = timezone.now()
         booking.save(update_fields=["booking_status", "updated_at", "cancelled_at"])
 
-        BookingAudit.objects.create(
-            booking=booking,
-            actor=request.user if request and request.user.is_authenticated else None,
+        actor_id = request.user.id if request and request.user.is_authenticated else None
+        transaction.on_commit(lambda: create_booking_audit_log.delay(
+            booking_id=booking.id,
             action="booking_cancelled",
             note=reason or "Booking cancelled.",
             metadata={"reason": reason or ""},
-        )
+            actor_id=actor_id
+        ))
 
         return booking
 
@@ -360,13 +364,14 @@ class BookingConfirmSerializer(serializers.Serializer):
         booking.confirmed_at = timezone.now()
         booking.save(update_fields=["booking_status", "payment_status", "confirmed_at", "updated_at"])
 
-        BookingAudit.objects.create(
-            booking=booking,
-            actor=request.user if request and request.user.is_authenticated else None,
+        actor_id = request.user.id if request and request.user.is_authenticated else None
+        transaction.on_commit(lambda: create_booking_audit_log.delay(
+            booking_id=booking.id,
             action="booking_confirmed",
             note=note or "Booking confirmed.",
             metadata={"note": note or ""},
-        )
+            actor_id=actor_id
+        ))
 
         return booking
 
