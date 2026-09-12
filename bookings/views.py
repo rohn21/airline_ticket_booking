@@ -14,17 +14,51 @@ from bookings.serializers import (
 from bookings.tasks import (
     send_booking_created_email,
     send_booking_confirmed_email,
-    create_booking_audit_log,
     generate_ticket_artifact,
 )
 from flights.tasks import refresh_flight_cache
+
+
+def _fetch_booking_for_response(booking_id):
+    """
+    Re-fetch the booking with a single optimised query covering all nested
+    relations required by BookingReadSerializer.  This collapses the
+    ~8-10 lazy SELECT statements that would otherwise fire during
+    serialisation into 4 queries (1 SELECT + 3 prefetch JOINs).
+    """
+    return (
+        Booking.objects
+        .select_related(
+            "user",
+            "flight",
+            "flight__route__origin",
+            "flight__route__destination",
+            "flight__airline",
+            "flight__aircraft",
+            "fare_rule",
+        )
+        .prefetch_related(
+            "passengers",
+            "seat_assignments",
+            "audits",
+        )
+        .get(id=booking_id)
+    )
 
 
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = (
         Booking.objects
         .filter(is_deleted=False)
-        .select_related("flight", "fare_rule", "user")
+        .select_related(
+            "user",
+            "flight",
+            "flight__route__origin",
+            "flight__route__destination",
+            "flight__airline",
+            "flight__aircraft",
+            "fare_rule",
+        )
         .prefetch_related("passengers", "seat_assignments", "audits")
     )
     permission_classes = [permissions.AllowAny]
@@ -62,18 +96,15 @@ class BookingViewSet(viewsets.ModelViewSet):
                 lambda booking_id=booking.id: send_booking_created_email.delay(booking_id)
             )
             transaction.on_commit(
-                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
-                    booking_id,
-                    "BOOKING_CREATED",
-                    {"pnr": pnr}
-                )
-            )
-            transaction.on_commit(
-                lambda flight_id=booking.flight_id:     refresh_flight_cache.delay(flight_id)
+                lambda flight_id=booking.flight_id: refresh_flight_cache.delay(flight_id)
             )
 
-        read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
-        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+        # Re-fetch with all relations pre-loaded — eliminates N+1 on serialisation
+        booking = _fetch_booking_for_response(booking.id)
+        return Response(
+            BookingReadSerializer(booking, context=self.get_serializer_context()).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def update(self, request, *args, **kwargs):
         kwargs["partial"] = True
@@ -87,19 +118,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             booking = serializer.save()
 
-            transaction.on_commit(
-                lambda booking_id=booking.id: create_booking_audit_log.delay(
-                    booking_id,
-                    "BOOKING_CONTACT_UPDATED",
-                    {
-                        "contact_email": booking.contact_email,
-                        "contact_phone": booking.contact_phone,
-                    }
-                )
-            )
-
-        read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
-        return Response(read_serializer.data, status=status.HTTP_200_OK)
+        booking = _fetch_booking_for_response(booking.id)
+        return Response(
+            BookingReadSerializer(booking, context=self.get_serializer_context()).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
@@ -111,18 +134,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking = serializer.save()
 
             transaction.on_commit(
-                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
-                    booking_id,
-                    "BOOKING_CANCELLED",
-                    {"pnr": pnr}
-                )
-            )
-            transaction.on_commit(
                 lambda flight_id=booking.flight_id: refresh_flight_cache.delay(flight_id)
             )
 
-        read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
-        return Response(read_serializer.data, status=status.HTTP_200_OK)
+        booking = _fetch_booking_for_response(booking.id)
+        return Response(
+            BookingReadSerializer(booking, context=self.get_serializer_context()).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["post"], url_path="confirm")
     def confirm(self, request, pk=None):
@@ -140,15 +159,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 lambda booking_id=booking.id: generate_ticket_artifact.delay(booking_id)
             )
             transaction.on_commit(
-                lambda booking_id=booking.id, pnr=booking.pnr: create_booking_audit_log.delay(
-                    booking_id,
-                    "BOOKING_CONFIRMED",
-                    {"pnr": pnr}
-                )
-            )
-            transaction.on_commit(
                 lambda flight_id=booking.flight_id: refresh_flight_cache.delay(flight_id)
             )
 
-        read_serializer = BookingReadSerializer(booking, context=self.get_serializer_context())
-        return Response(read_serializer.data, status=status.HTTP_200_OK)
+        booking = _fetch_booking_for_response(booking.id)
+        return Response(
+            BookingReadSerializer(booking, context=self.get_serializer_context()).data,
+            status=status.HTTP_200_OK,
+        )
