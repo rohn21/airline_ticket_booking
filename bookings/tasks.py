@@ -82,11 +82,19 @@ def generate_ticket_artifact(self, booking_id):
 
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=True, max_retries=3)
-def create_booking_audit_log(self, booking_id, event_name, meta=None):
+def create_booking_audit_log(self, booking_id, action, note="", metadata=None, actor_id=None):
     logger.info(
-        "create_booking_audit_log booking_id=%s event_name=%s meta=%s",
+        "create_booking_audit_log booking_id=%s action=%s meta=%s",
         booking_id,
-        event_name,
-        meta or {},
+        action,
+        metadata or {},
     )
-    return {"booking_id": booking_id, "event_name": event_name}
+    from bookings.models import BookingAudit
+    BookingAudit.objects.create(
+        booking_id=booking_id,
+        action=action,
+        note=note,
+        metadata=metadata or {},
+        actor_id=actor_id,
+    )
+    return {"booking_id": booking_id, "action": action}
